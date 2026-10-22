@@ -1,44 +1,40 @@
-"""
-Custom PySide6 Widget for live X/Y coordinate plane and H-pattern region overlay.
-"""
-
-from typing import Dict, List, Tuple, Any
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont
 from PySide6.QtWidgets import QWidget
-
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont
+from PySide6.QtCore import Qt
 
 class JoystickVisualizerWidget(QWidget):
-
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.raw_x = 512
-        self.raw_y = 512
         self.norm_x = 0.0
         self.norm_y = 0.0
-        self.regions: List[Dict[str, Any]] = []
-        self.active_region_name = "Neutral"
-        self.is_connected = False
-        self.setMinimumSize(250, 250)
+        self.raw_x = 512
+        self.raw_y = 512
+        self.regions = []
+        self.active_gear = "Neutral"
+        self.is_live = False
 
-    def update_position(
-        self,
-        raw_x: int,
-        raw_y: int,
-        norm_x: float,
-        norm_y: float,
-        connected: bool,
-    ):
-        self.raw_x = raw_x
-        self.raw_y = raw_y
-        self.norm_x = max(-1.0, min(1.0, norm_x))
-        self.norm_y = max(-1.0, min(1.0, norm_y))
-        self.is_connected = connected
+        # Map gear names to their respective virtual gamepad button tags for the UI display
+        self.gear_to_button = {
+            "Gear 1": "LB",
+            "Gear 2": "RB",
+            "Gear 3": "BACK",
+            "Gear 4": "START",
+            "Gear 5": "LS",
+            "Gear 6": "RS",
+            "Reverse": "UP"
+        }
+
+    def set_regions(self, regions, active_gear):
+        self.regions = regions
+        self.active_gear = active_gear
         self.update()
 
-    def set_regions(self, regions: List[Dict[str, Any]], active_name: str):
-        self.regions = regions
-        self.active_region_name = active_name
+    def update_position(self, raw_x, raw_y, norm_x, norm_y, is_live):
+        self.raw_x = raw_x
+        self.raw_y = raw_y
+        self.norm_x = norm_x
+        self.norm_y = norm_y
+        self.is_live = is_live
         self.update()
 
     def paintEvent(self, event):
@@ -47,56 +43,54 @@ class JoystickVisualizerWidget(QWidget):
 
         width = self.width()
         height = self.height()
-        side = min(width, height)
-        
-        # Center square plane
-        plane_rect = QRectF(
-            (width - side) / 2 + 20,
-            (height - side) / 2 + 20,
-            side - 40,
-            side - 40,
-        )
 
-        # Background
-        painter.fillRect(plane_rect, QBrush(QColor(30, 30, 30)))
+        # Background box
+        painter.setBrush(QBrush(QColor(30, 30, 30)))
         painter.setPen(QPen(QColor(80, 80, 80), 2))
-        painter.drawRect(plane_rect)
+        painter.drawRect(0, 0, width, height)
 
-        # Center axes
-        cx = plane_rect.center().x()
-        cy = plane_rect.center().y()
+        # Draw crosshairs (Neutral center)
         painter.setPen(QPen(QColor(60, 60, 60), 1, Qt.DashLine))
-        painter.drawLine(plane_rect.left(), cy, plane_rect.right(), cy)
-        painter.drawLine(cx, plane_rect.top(), cx, plane_rect.bottom())
+        painter.drawLine(width // 2, 0, width // 2, height)
+        painter.drawLine(0, height // 2, width, height // 2)
 
-        # Draw H-pattern regions if configured
+        # Draw mapped regions & their assigned button labels
         for reg in self.regions:
-            rx1 = plane_rect.left() + (reg["x_min"] + 1.0) / 2.0 * plane_rect.width()
-            rx2 = plane_rect.left() + (reg["x_max"] + 1.0) / 2.0 * plane_rect.width()
-            ry1 = plane_rect.top() + (1.0 - (reg["y_max"] + 1.0) / 2.0) * plane_rect.height()
-            ry2 = plane_rect.top() + (1.0 - (reg["y_min"] + 1.0) / 2.0) * plane_rect.height()
-            r_rect = QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1)
+            name = reg.get("name", "")
+            btn_label = self.gear_to_button.get(name, "")
+            
+            x_min_px = int((reg["x_min"] + 1.0) / 2.0 * width)
+            x_max_px = int((reg["x_max"] + 1.0) / 2.0 * width)
+            y_min_px = int((reg["y_min"] + 1.0) / 2.0 * height)
+            y_max_px = int((reg["y_max"] + 1.0) / 2.0 * height)
 
-            if reg["name"] == self.active_region_name:
-                painter.fillRect(r_rect, QBrush(QColor(0, 120, 215, 80)))
-                painter.setPen(QPen(QColor(0, 120, 215), 2))
+            r_w = x_max_px - x_min_px
+            r_h = y_max_px - y_min_px
+
+            if name == self.active_gear:
+                painter.setBrush(QBrush(QColor(0, 120, 215, 120)))  # Highlight active gear
+                painter.setPen(QPen(QColor(0, 150, 255), 2))
             else:
-                painter.fillRect(r_rect, QBrush(QColor(60, 60, 60, 40)))
-                painter.setPen(QPen(QColor(100, 100, 100), 1))
-            painter.drawRect(r_rect)
+                painter.setBrush(QBrush(QColor(70, 70, 70, 80)))
+                painter.setPen(QPen(QColor(120, 120, 120), 1))
 
-            painter.setPen(QPen(QColor(200, 200, 200), 1))
-            painter.setFont(QFont("Segoe UI", 8))
-            painter.drawText(r_rect, Qt.AlignCenter, reg["name"])
+            painter.drawRect(x_min_px, y_min_px, r_w, r_h)
 
-        # Current Position Marker
-        if self.is_connected:
-            marker_x = cx + self.norm_x * (plane_rect.width() / 2.0)
-            marker_y = cy - self.norm_y * (plane_rect.height() / 2.0) # Screen Y inverted
-            painter.setBrush(QBrush(QColor(0, 200, 100)))
+            # Draw text inside region: Gear Name + Assigned Button
+            painter.setPen(QPen(QColor(255, 255, 255)))
+            painter.setFont(QFont("Arial", 9, QFont.Bold))
+            display_text = f"{name}\n[{btn_label}]" if btn_label else name
+            painter.drawText(x_min_px, y_min_px, r_w, r_h, Qt.AlignCenter, display_text)
+
+        # Draw live joystick ball position
+        dot_x = int((self.norm_x + 1.0) / 2.0 * width)
+        dot_y = int((self.norm_y + 1.0) / 2.0 * height)
+
+        if self.is_live:
+            painter.setBrush(QBrush(QColor(40, 200, 80)))
             painter.setPen(QPen(QColor(255, 255, 255), 2))
-            painter.drawEllipse(QRectF(marker_x - 8, marker_y - 8, 16, 16))
         else:
-            painter.setPen(QPen(QColor(200, 50, 50), 1))
-            painter.setFont(QFont("Segoe UI", 12, QFont.Bold))
-            painter.drawText(plane_rect, Qt.AlignCenter, "DISCONNECTED / STALE")
+            painter.setBrush(QBrush(QColor(150, 150, 150)))
+            painter.setPen(QPen(QColor(100, 100, 100), 1))
+
+        painter.drawEllipse(dot_x - 10, dot_y - 10, 20, 20)

@@ -22,11 +22,9 @@ class RacingControllerApp(QMainWindow):
         self.setWindowTitle("DIY Racing Controller Dashboard")
         self.resize(1000, 750)
         
-        # Load the Window Icon safely for both Python and PyInstaller .exe
         icon_path = self.resource_path("icon.ico")
         self.setWindowIcon(QIcon(icon_path))
 
-        # 1. Initialize Engines & Profile Manager
         self.profile_manager = ProfileManager()
         self.region_engine = RegionMappingEngine()
         self.steering_engine = SteeringEngine(max_steering_angle=450.0, counts_per_degree=0.08333)
@@ -36,21 +34,15 @@ class RacingControllerApp(QMainWindow):
         self.serial_worker = None
         self.is_connected = False
         
-        # State tracking
         self.current_norm_x = 0.0
         self.current_norm_y = 0.0
         self.current_raw_encoder = 0
         
-        # Load profile from disk immediately
         self.load_active_profile()
-
-        # 2. Build UI
         self.init_ui()
 
     def resource_path(self, relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller."""
         try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
             base_path = sys._MEIPASS
         except Exception:
             base_path = os.path.abspath(".")
@@ -58,7 +50,6 @@ class RacingControllerApp(QMainWindow):
 
     def load_active_profile(self):
         profile = self.profile_manager.load_profile()
-        
         self.steering_engine.counts_per_degree = profile["steering"].get("counts_per_degree", 0.08333)
         self.steering_engine.max_steering_angle = profile["steering"].get("max_angle", 450.0)
         self.steering_engine.calibrate_centre(profile["steering"].get("center_count", 0))
@@ -89,7 +80,6 @@ class RacingControllerApp(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # --- TOP CONTROL BAR ---
         top_bar = QHBoxLayout()
         self.port_combo = QComboBox()
         self.refresh_ports()
@@ -116,15 +106,12 @@ class RacingControllerApp(QMainWindow):
         top_bar.addWidget(self.btn_release_all)
         main_layout.addLayout(top_bar)
 
-        # --- MAIN TABS ---
         tabs = QTabWidget()
         main_layout.addWidget(tabs)
 
-        # TAB 1: Dashboard
         dash_widget = QWidget()
         dash_layout = QHBoxLayout(dash_widget)
         
-        # Left Panel: Steering & Pedals
         left_panel = QVBoxLayout()
         steer_box = QGroupBox("Steering Telemetry")
         steer_layout = QFormLayout(steer_box)
@@ -177,7 +164,6 @@ class RacingControllerApp(QMainWindow):
         left_panel.addStretch()
         dash_layout.addLayout(left_panel, 1)
 
-        # Right Panel: Joystick Visualizer & Gear Mapping
         right_panel = QVBoxLayout()
         visualizer_box = QGroupBox("Live H-Pattern Visualizer")
         vis_layout = QVBoxLayout(visualizer_box)
@@ -194,24 +180,23 @@ class RacingControllerApp(QMainWindow):
 
         mapping_box = QGroupBox("Quick Gear Mapping (Move Joystick, then click Set)")
         mapping_layout = QGridLayout(mapping_box)
-        gears = ["Gear 1", "Gear 3", "Gear 5", "Reverse", "Gear 2", "Gear 4", "Gear 6", ""]
         
+        # Sequentially ordered mapping buttons
+        gears = ["Gear 1", "Gear 2", "Gear 3", "Gear 4", "Gear 5", "Gear 6", "Reverse"]
         for i, g_name in enumerate(gears):
-            if g_name == "": continue
             btn = QPushButton(f"Set {g_name}")
             btn.clicked.connect(lambda checked, name=g_name: self.set_gear_region(name))
-            mapping_layout.addWidget(btn, i % 2, i // 2)
+            mapping_layout.addWidget(btn, i // 2, i % 2)
 
         self.btn_clear_gears = QPushButton("Clear All Gears")
         self.btn_clear_gears.setStyleSheet("background-color: darkorange; color: white; font-weight: bold;")
         self.btn_clear_gears.clicked.connect(self.clear_all_gears)
-        mapping_layout.addWidget(self.btn_clear_gears, 2, 0, 1, 4)
+        mapping_layout.addWidget(self.btn_clear_gears, 4, 0, 1, 2)
 
         right_panel.addWidget(mapping_box, 1)
         dash_layout.addLayout(right_panel, 2)
         tabs.addTab(dash_widget, "Dashboard")
 
-        # TAB 2: Settings & Profiles
         settings_widget = QWidget()
         settings_layout = QVBoxLayout(settings_widget)
         
@@ -284,8 +269,9 @@ class RacingControllerApp(QMainWindow):
             self.status_lbl.setText("Cannot map gear: Controller is not connected!")
             return
             
-        radius_x = 0.15
-        radius_y = 0.20
+        # Tighter radii to prevent overlapping zones between adjacent gates (e.g. 4th triggering 2nd)
+        radius_x = 0.07
+        radius_y = 0.09
         x_min = max(-1.0, self.current_norm_x - radius_x)
         x_max = min(1.0, self.current_norm_x + radius_x)
         y_min = max(-1.0, self.current_norm_y - radius_y)
@@ -307,7 +293,7 @@ class RacingControllerApp(QMainWindow):
             })
             
         self.joystick_viz.set_regions(self.region_engine.regions, self.region_engine.active_region)
-        self.status_lbl.setText(f"{gear_name} mapped. REMEMBER TO SAVE PROFILE!")
+        self.status_lbl.setText(f"{gear_name} mapped with tight bounds. REMEMBER TO SAVE PROFILE!")
 
     def clear_all_gears(self):
         self.region_engine.regions.clear()
@@ -386,11 +372,15 @@ class RacingControllerApp(QMainWindow):
         self.lbl_steer_virt.setText(f"{virt_deg:.1f}°")
         self.lbl_steer_norm.setText(f"{norm_steer:.3f}")
 
-        self.bar_accel.setValue(packet["accelerator"])
-        self.bar_brake.setValue(packet["brake"])
-        self.bar_clutch.setValue(packet["clutch"])
-        
+        accel_state = packet["accelerator"] == 1
+        brake_state = packet["brake"] == 1
+        clutch_state = packet["clutch"] == 1
         horn_state = packet["horn"] == 1
+
+        self.bar_accel.setValue(int(accel_state))
+        self.bar_brake.setValue(int(brake_state))
+        self.bar_clutch.setValue(int(clutch_state))
+        
         self.lbl_horn.setText("PRESSED" if horn_state else "RELEASED")
         self.lbl_horn.setStyleSheet("color: red; font-weight: bold;" if horn_state else "")
 
@@ -413,11 +403,21 @@ class RacingControllerApp(QMainWindow):
         )
 
         if self.chk_enable_output.isChecked() and is_hardware_live:
-            self.gamepad.update_axes(steering_norm=norm_steer, joy_x_norm=self.current_norm_x, joy_y_norm=self.current_norm_y)
-            self.gamepad.set_button("A", packet["accelerator"] == 1)
-            self.gamepad.set_button("B", packet["brake"] == 1)
-            self.gamepad.set_button("Y", packet["clutch"] == 1)
-            self.gamepad.set_button("X", horn_state)
+            self.gamepad.update_axes(steering_norm=norm_steer, joy_x_norm=0.0, joy_y_norm=0.0)
+            self.gamepad.update_triggers(clutch_pressed=clutch_state)
+            
+            self.gamepad.set_button("A", accel_state)
+            self.gamepad.set_button("B", brake_state)
+            self.gamepad.set_button("Y", horn_state)
+
+            # Steady-state mapping
+            self.gamepad.set_button("LB", active_gear == "Gear 1")
+            self.gamepad.set_button("RB", active_gear == "Gear 2")
+            self.gamepad.set_button("BACK", active_gear == "Gear 3")
+            self.gamepad.set_button("START", active_gear == "Gear 4")
+            self.gamepad.set_button("LS", active_gear == "Gear 5")
+            self.gamepad.set_button("RS", active_gear == "Gear 6")
+            self.gamepad.set_button("UP", active_gear == "Reverse")
         elif not self.chk_enable_output.isChecked():
             self.gamepad.release_all()
 
